@@ -4,10 +4,7 @@
 
 import streamlit as st
 import pandas as pd
-import numpy as np
-
 import plotly.express as px
-import matplotlib.pyplot as plt
 from plotly_calplot import calplot
 
 
@@ -16,6 +13,7 @@ def prepare_table(df: pd.DataFrame):
 
     df["Abteilung"] = df["OEKEY"].str[3:5]
     df["Gerät"] = df["OEKEY"].str[:2]
+    df["Gesamt"] = "Gesamt"
 
     df["DokDatum"] = pd.to_datetime(df["DokDatum"], dayfirst=True)
     df["Date"] = pd.to_datetime(df["DokDatum"]).dt.date
@@ -47,15 +45,14 @@ def make_sunburst(df: pd.DataFrame, typ="Leistung"):
     elif typ == "Leistung":
         df = df[df["Leistung"].str.contains("MPR") == False]
 
-    df["gesamt"] = "Gesamt"
     df_machine = df.pivot_table(
-        columns=["gesamt", "Gerät", "Leistung"], aggfunc="count"
+        columns=["Gesamt", "Gerät", "Leistung"], aggfunc="count"
     ).T.reset_index()
     fig = px.sunburst(
         df_machine,
         width=1000,
         height=1000,
-        path=["gesamt", "Gerät", "Leistung"],
+        path=["Gesamt", "Gerät", "Leistung"],
         values="OEKEY",
     )
 
@@ -96,12 +93,12 @@ def make_calplot(df: pd.DataFrame):
 # PAGE STARTS HERE
 st.set_page_config(layout="wide")
 
-st.markdown("# blaek🐑 ")
+st.markdown("# blaek 🐑 ")
 
 file_upload = st.file_uploader("Mitarbeiter Statistik")
 
 
-if file_upload:
+if file_upload is not None:
     try:
         df = pd.read_excel(
             file_upload,
@@ -109,6 +106,7 @@ if file_upload:
             usecols=["Leistung", "OEKEY", "IND1", "IND2", "DokDatum"],
         )
     except Exception:
+        df = pd.DataFrame({"Test": "failed"})
         print(Exception)
 
     df = prepare_table(df)
