@@ -1,6 +1,16 @@
-# MitarbeiterStatisik des UKW/Radiologie visualisiert und ausgewertet
-# May 2023 hendel_r@ukw.de
-# streamlit run blaek_stats.py
+# MitarbeiterStatisik des UKW / Radiologie ausgewertet und visualisiert
+# Leistungen sind jeweils nur einer BLAEK-Kategorie zugeordnet
+# Die Zuordnung stammt von mir und ist nicht offiziell
+# Die Zuordnung muss verbessert werden weil nicht 1 zu 1 möglich
+# ––> siehe Dokument blaek_map.xlsx
+# Mai und Juni 2023 hendel_r@ukw.de
+# lokal starten mit: streamlit run blaek_stats.py
+# –––––– need to fix –––––––
+# 5.6.2023 UserWarning: The DataFrame has column names of mixed type. They will be converted to strings and not roundtrip correctly.
+# todo:
+# – fix error
+# – improve mapping
+# – make pdf export
 
 import streamlit as st
 import pandas as pd
@@ -9,20 +19,45 @@ from plotly_calplot import calplot
 
 
 def prepare_table(df: pd.DataFrame):
+    # forward fill empty data
     df = df.fillna(method="ffill")
 
+    # define new columns
     df["Abteilung"] = df["OEKEY"].str[3:5]
     df["Gerät"] = df["OEKEY"].str[:2]
-    df["Gesamt"] = "Gesamt"
+    # df["Gesamt"] = "Gesamt"
 
     df["DokDatum"] = pd.to_datetime(df["DokDatum"], dayfirst=True)
-    df["Date"] = pd.to_datetime(df["DokDatum"]).dt.date
+    df["Date"] = pd.to_datetime(
+        df["DokDatum"]
+    ).dt.date  # seems redundant, need to revisit
 
+    # add some more helper columns
     df["DokYear"] = df["DokDatum"].dt.year.astype(int)
     df["DokMonth"] = df["DokDatum"].dt.month.astype(int)
     df["DayName"] = df["DokDatum"].dt.day_name()
 
+    # map to blaek categories
+    bm = pd.read_excel("blaek_map.xlsx")
+    bm.fillna("nicht definiert", inplace=True)
+
+    df = pd.merge(df, bm, left_on="Leistung", right_on="ukw")
+
     return df
+
+
+def make_blaektable(df: pd.DataFrame):
+    pt = pd.pivot_table(
+        df[df.IND2 == 1],
+        index=["blaek"],
+        columns="DokYear",
+        values="IND2",
+        aggfunc="count",
+    )
+    pt["Gesamt"] = pt.sum(axis=1)
+    pt.fillna(0, inplace=True)
+
+    return pt.astype(int)
 
 
 def n_leistungen_n_dokumente(df: pd.DataFrame):
@@ -39,24 +74,26 @@ def query_DataFrame(df: pd.DataFrame, query: str):
     return df_query, n_results
 
 
-def make_sunburst(df: pd.DataFrame, typ="Leistung"):
+def make_sunburst(df: pd.DataFrame, typ=None):
     if typ == "Dokumente":
         df = df[df["IND2"] == 1]
-    elif typ == "Leistung":
+        our_path = [px.Constant("Gesamt"), "Gerät", "Leistung"]
+    elif typ == "blaek":
+        our_path = [px.Constant("Gesamt"), "blaek", "Leistung"]
+    else:  # default to Leistungen
         df = df[df["Leistung"].str.contains("MPR") == False]
+        our_path = [px.Constant("Gesamt"), "Gerät", "Leistung"]
 
-    df_machine = df.pivot_table(
-        columns=["Gesamt", "Gerät", "Leistung"], aggfunc="count"
-    ).T.reset_index()
     fig = px.sunburst(
-        df_machine,
+        df,
         width=1000,
         height=1000,
-        path=["Gesamt", "Gerät", "Leistung"],
-        values="OEKEY",
+        path=our_path,
     )
 
-    fig.update_traces(textinfo="label+value")
+    fig.update_traces(
+        textinfo="label + value"
+    )  # same as fig.data[0].textinfo = 'label + value'
     fig.update_layout(margin=dict(t=0, l=0, r=0, b=0))
 
     return fig
@@ -116,23 +153,25 @@ if file_upload is not None:
         f"Insgesamt {n_leist} Leistungen in {n_doks} Dokumenten. Zwischen {df.DokDatum.min().date()} und {df.DokDatum.max().date()}"
     )
 
-    suche = st.text_input("Leistungen durchsuchen:")
+    # BLAEK
+    st.markdown("## Facharzt?")
+    df_blaek = make_blaektable(df)
+    st.table(df_blaek)
 
-    df_query, n_results = query_DataFrame(df, suche)
-    st.markdown(f"Der Suchbegriff: {suche} fand sich in {n_results} Leistungen.")
-
-    # st.table(df_query.head(3))
-
-    # DOKUMENTE
-    st.markdown("## Dokumente")
-    sun = make_sunburst(df_query, typ="Dokumente")
+    sun = make_sunburst(df, typ="blaek")
     st.plotly_chart(sun, use_container_width=True)
 
-    st.markdown("Anzahl der Dokumente nach Modalität und Jahr")
-    st.table(make_yeartable(df, "Dokumente"))
+    # DETAILS
+    st.markdown("# Details")
+    st.markdown("## Suchen")
+    suche = st.text_input(
+        "Hier Begriff eintippen und Enter drücken um in den Leistungen zu suchen. Schränkt die nachfolgenden Leistungen und Dokumente ein:"
+    )
+    df_query, n_results = query_DataFrame(df, suche)
+    st.markdown(f"Der Suchbegriff: {suche} fand sich in {n_results} Leistungen. ")
 
     # LEISTUNGEN
-    st.markdown("## Leistungen")
+    st.markdown("### Leistungen")
     st.markdown("ohne MIP/MPR")
     sun = make_sunburst(df_query, typ="Leistungen")
     st.plotly_chart(sun, use_container_width=True)
@@ -140,8 +179,18 @@ if file_upload is not None:
     st.markdown("Anzahl der Leistungen nach Modalität und Jahr")
     st.table(make_yeartable(df, "Leistung"))
 
-    # HEATMAP (calplot)
-    st.markdown("## Heatmap")
-    st.markdown("Leistungen")
+    # DOKUMENTE
+    st.markdown("### Dokumente")
+    sun = make_sunburst(df_query, typ="Dokumente")
+    st.plotly_chart(sun, use_container_width=True)
+
+    st.markdown("Anzahl der Dokumente nach Modalität und Jahr")
+    st.table(make_yeartable(df, "Dokumente"))
+
+    # KALENDER
+    st.markdown("# Kalender")
+    st.markdown(
+        "Sämtliche Leistungen (nicht Dokumente). Wird nicht durch Suche eingeschränkt."
+    )
     cal = make_calplot(df)
     st.plotly_chart(cal, use_container_width=True)
