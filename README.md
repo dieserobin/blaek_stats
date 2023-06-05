@@ -4,7 +4,7 @@ Erlaubt den Upload der "Mitarbeiterstatistik" und stellt die Anzahl der Dokument
 [BLAEK / Logbuch Facharzt Radiologie](https://www.blaek.de/weiterbildung/qualifikationen-nach-der-weiterbildungsordnung/facharzt-fuer-radiologie)
 
 ## to do
-* Mapping auf Kategorien (Logbuch Seite 6)
+* Mapping verbessern (nicht 1 zu 1, sondern 1 zu vielen)
 * PDF Download mit Tabellen
 
 
