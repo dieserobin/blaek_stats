@@ -8,12 +8,14 @@
 # –––––– need to fix –––––––
 # 5.6.2023 UserWarning: The DataFrame has column names of mixed type. They will be converted to strings and not roundtrip correctly.
 # todo:
+# – MIP/MPR auch bei blaek sunburst rausschmeißen - bzw in mapping anpassen
 # – fix error
 # – improve mapping
 # – make pdf export
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 from plotly_calplot import calplot
 
@@ -28,9 +30,11 @@ def prepare_table(df: pd.DataFrame):
     # df["Gesamt"] = "Gesamt"
 
     df["DokDatum"] = pd.to_datetime(df["DokDatum"], dayfirst=True)
-    df["Date"] = pd.to_datetime(
-        df["DokDatum"]
-    ).dt.date  # seems redundant, need to revisit
+    df["GebDatum"] = pd.to_datetime(df["GebDatum"], dayfirst=True)
+    df["Age"] = (df["DokDatum"] - df["GebDatum"]) / np.timedelta64(1, "Y")
+    # df["Date"] = pd.to_datetime(
+    #    df["DokDatum"]
+    # ).dt.date  # seems redundant, need to revisit
 
     # add some more helper columns
     df["DokYear"] = df["DokDatum"].dt.year.astype(int)
@@ -46,12 +50,27 @@ def prepare_table(df: pd.DataFrame):
     return df
 
 
+def make_fachkunde(df: pd.DataFrame):
+    # returns number of Dokumente
+    # aggregate "fach" column
+    pt = pd.pivot_table(
+        df[df.IND2 == 1],
+        index="fach",
+        values="Leistung",
+        aggfunc="count",
+    )
+    pt.fillna(0, inplace=True)
+
+    return pt.astype(int)
+
+
 def make_blaektable(df: pd.DataFrame):
+    # returns number of Dokumente
     pt = pd.pivot_table(
         df[df.IND2 == 1],
         index=["blaek"],
         columns="DokYear",
-        values="IND2",
+        values="Leistung",
         aggfunc="count",
     )
     pt["Gesamt"] = pt.sum(axis=1)
@@ -94,7 +113,7 @@ def make_sunburst(df: pd.DataFrame, typ=None):
     fig.update_traces(
         textinfo="label + value"
     )  # same as fig.data[0].textinfo = 'label + value'
-    fig.update_layout(margin=dict(t=0, l=0, r=0, b=0))
+    fig.update_layout(margin=dict(t=30, l=0, r=0, b=30))
 
     return fig
 
@@ -130,7 +149,7 @@ def make_calplot(df: pd.DataFrame):
 # PAGE STARTS HERE
 st.set_page_config(layout="wide")
 
-st.markdown("# blaek 🐑 ")
+st.markdown("# baba blaek 🐑 ")
 
 file_upload = st.file_uploader("Mitarbeiter Statistik")
 
@@ -140,7 +159,7 @@ if file_upload is not None:
         df = pd.read_excel(
             file_upload,
             header=9,  # magic number 9 is row with headers
-            usecols=["Leistung", "OEKEY", "IND1", "IND2", "DokDatum"],
+            usecols=["Leistung", "OEKEY", "IND1", "IND2", "DokDatum", "GebDatum"],
         )
     except Exception:
         df = pd.DataFrame({"Test": "failed"})
@@ -153,44 +172,78 @@ if file_upload is not None:
         f"Insgesamt {n_leist} Leistungen in {n_doks} Dokumenten. Zwischen {df.DokDatum.min().date()} und {df.DokDatum.max().date()}"
     )
 
-    # BLAEK
-    st.markdown("## Facharzt?")
-    df_blaek = make_blaektable(df)
-    st.table(df_blaek)
+    # FILTER AGE
+    st.markdown("# Filter")
+    st.markdown("## Alter")
 
-    sun = make_sunburst(df, typ="blaek")
-    st.plotly_chart(sun, use_container_width=True)
+    # cut_low, cut_high = st.slider(
+    #     "Hier Unter- und Obergrenze des Patientenalters angeben:",
+    #     min_value=0,
+    #     max_value=110,
+    #     value=(0, 110),
+    # )
 
-    # DETAILS
-    st.markdown("# Details")
-    st.markdown("## Suchen")
+    with st.form(key="columns_in_form"):
+        c1, c2 = st.columns(2)
+        with c1:
+            cut_low = st.number_input("von…", 0, 110, 0)
+        with c2:
+            cut_high = st.number_input("bis…", 0, 110, 110)
+        submitButton = st.form_submit_button(label="Enter")
+
+    df_age = df[df.Age.between(cut_low, cut_high)]
+
+    # FILTER Leistung
+    st.markdown("## Suche")
     suche = st.text_input(
         "Hier Begriff eintippen und Enter drücken um in den Leistungen zu suchen. Schränkt die nachfolgenden Leistungen und Dokumente ein:"
     )
-    df_query, n_results = query_DataFrame(df, suche)
+    df_query, n_results = query_DataFrame(df_age, suche)
     st.markdown(f"Der Suchbegriff: {suche} fand sich in {n_results} Leistungen. ")
 
-    # LEISTUNGEN
-    st.markdown("### Leistungen")
-    st.markdown("ohne MIP/MPR")
-    sun = make_sunburst(df_query, typ="Leistungen")
-    st.plotly_chart(sun, use_container_width=True)
+    st.markdown("# Ergebnisse")
 
-    st.markdown("Anzahl der Leistungen nach Modalität und Jahr")
-    st.table(make_yeartable(df, "Leistung"))
+    # FACHKUNDE
+    st.markdown("## Fachkunde?")
+    st.markdown(
+        "Für die Beantragung der Fachkunde ist die Anwendung ionisierender Strahlung relevant."
+    )
+    df_fach = make_fachkunde(df_query)
+    st.table(df_fach)
+
+    # FACHARZT
+    st.markdown("## Facharzt?")
+    df_blaek = make_blaektable(df_query)  # not influenced by
+    st.table(df_blaek)
+    # st.plotly_chart(blaek_sun, use_container_width=True)
+
+    # LEISTUNGEN
+    st.markdown("## Leistungen")
+    st.markdown("Anzahl der Leistungen nach Modalität und Jahr (ohne MIP/MPR).")
+    sun = make_sunburst(df_query, typ="Leistungen")
+    # st.plotly_chart(sun, use_container_width=True)
+
+    st.table(make_yeartable(df_query, "Leistung"))
 
     # DOKUMENTE
-    st.markdown("### Dokumente")
+    st.markdown("## Dokumente")
     sun = make_sunburst(df_query, typ="Dokumente")
-    st.plotly_chart(sun, use_container_width=True)
+    # st.plotly_chart(sun, use_container_width=True)
 
     st.markdown("Anzahl der Dokumente nach Modalität und Jahr")
-    st.table(make_yeartable(df, "Dokumente"))
+    st.table(make_yeartable(df_query, "Dokumente"))
 
     # KALENDER
     st.markdown("# Kalender")
     st.markdown(
         "Sämtliche Leistungen (nicht Dokumente). Wird nicht durch Suche eingeschränkt."
     )
-    cal = make_calplot(df)
-    st.plotly_chart(cal, use_container_width=True)
+    calendar_map = make_calplot(df)
+    st.plotly_chart(calendar_map, use_container_width=True)
+
+    # SUNBURST
+    st.markdown("# Modalität")  # Leistungen! nicht Dokumente
+    st.markdown("Sämtliche Leistungen ohne Filter.")
+    # don't want this to adjust frequently so not _query or _age
+    blaek_sun = make_sunburst(df, typ="blaek")
+    st.plotly_chart(blaek_sun, use_container_width=True)
