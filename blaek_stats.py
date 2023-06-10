@@ -42,7 +42,7 @@ def prepare_table(df: pd.DataFrame):
     df["DayName"] = df["DokDatum"].dt.day_name()
 
     # map to blaek categories
-    bm = pd.read_excel("blaek_map.xlsx")
+    bm = pd.read_excel("data/blaek_map.xlsx")
     bm.fillna("nicht definiert", inplace=True)
 
     df = pd.merge(df, bm, left_on="Leistung", right_on="ukw")
